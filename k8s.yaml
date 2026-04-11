@@ -1,0 +1,67 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-eks-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fastapi-eks-demo
+  template:
+    metadata:
+      labels:
+        app: fastapi-eks-demo
+    spec:
+      serviceAccountName: pod-ident-sa
+      containers:
+        - name: app
+          image: 854912240456.dkr.ecr.us-east-1.amazonaws.com/fastapi-s3-pg:latest
+          imagePullPolicy: Always # IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: db-config
+            - configMapRef:
+                name: s3-config
+          env:
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-db-secret
+                  key: DB_PASSWORD
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-eks-demo
+spec:
+  selector:
+    app: fastapi-eks-demo
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: NodePort
