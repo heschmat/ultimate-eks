@@ -39,6 +39,16 @@ kubectl get nodes
 
 kubectl config current-context
 
+aws eks list-addons --cluster-name $CLUSTER_NAME
+# {
+#     "addons": [
+#         "coredns",
+#         "kube-proxy",
+#         "metrics-server",
+#         "vpc-cni"
+#     ]
+# }
+
 ```
 
 ### RDS PG
@@ -240,6 +250,7 @@ docker push $IMAGE_URI
 cat k8s.yaml | grep image:
 
 # Make sure the app image uri, the sa ... are set correctly:
+# 📝 set the `serviceAccountName: pod-ident-sa`
 kubectl apply -f k8s.yaml
 
 ```
@@ -391,7 +402,7 @@ aws iam create-role \
 # create the S3 permissions policy
 # ⚠️ Make sure it gives permission to the right S3 bucket.
 export S3_BUCKET=fastapi-eks-demo-ijk
-envsubst < policy.json.tpl > s3-policy.json
+envsubst < s3-policy.json.tpl > s3-policy.json
 
 aws iam create-policy \
   --policy-name $IAM_POLICY_NAME \
