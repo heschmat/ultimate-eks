@@ -146,7 +146,7 @@ aws eks create-pod-identity-association \
 
 
 # verify
-aws eks list-pod-identity-associations   --cluster-name $CLUSTER_NAME   --region $AWS_REGION
+aws eks list-pod-identity-associations --cluster-name $CLUSTER_NAME --region $AWS_REGION
 # {
 #     "associations": [
 #         {
