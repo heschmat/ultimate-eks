@@ -5,13 +5,7 @@
 aws secretsmanager create-secret \
   --region $AWS_REGION \
   --name prod/fastapi-app/db \
-  --secret-string '{"DB_PASSWORD":"TopSecretPassword4DB<>"}'
-
-
-aws secretsmanager put-secret-value \
-  --secret-id prod/fastapi-app/db \
-  --secret-string '{"DB_PASSWORD":"DoesThisSmellFunnyToYou?"}'
-
+  --secret-string '{"DB_PASSWORD":"TopSecretPassword4DB!"}'
 
 aws secretsmanager describe-secret \
   --region $AWS_REGION \
@@ -26,7 +20,7 @@ aws secretsmanager get-secret-value \
 #     "ARN": "arn:aws:secretsmanager:us-east-1:854912240456:secret:prod/fastapi-app/db-D2rE1W",
 #     "Name": "prod/fastapi-app/db",
 #     "VersionId": "ec069a86-f8a2-4971-817c-1c4e4160267c",
-#     "SecretString": "{\"DB_PASSWORD\":\"DoesThisSmellFunnyToYou?\"}",
+#     "SecretString": "{\"DB_PASSWORD\":\"TopSecretPassword4DB<>\"}",
 #     "VersionStages": [
 #         "AWSCURRENT"
 #     ],
@@ -61,6 +55,8 @@ Create an IAM policy that can read only this one secret.
 # "arn:aws:secretsmanager:us-east-1:854912240456:secret:prod/fastapi-app/db-D2rE1W"
 
 envsubst < ./secrets/eso-secretsmanager-policy.json.tpl > eso-sm-policy.json
+# make sure the `Resource` in `eso-sm-policy.json` is:
+# "Resource": "arn:aws:secretsmanager:us-east-1:854912240456:secret:prod/fastapi-app/db*"
 
 aws iam create-policy \
   --policy-name FastApiAppEsoReadSecret \
@@ -82,6 +78,33 @@ aws iam list-attached-role-policies --role-name $IAM_ROLE_NAME
 #         {
 #             "PolicyName": "FastApiS3Policy",
 #             "PolicyArn": "arn:aws:iam::854912240456:policy/FastApiS3Policy"
+#         }
+#     ]
+# }
+
+# double check the policy is as expected:
+# 1) IAM policies are versioned, so first find which version is active:
+# IAM allows max 5 versions per policy.
+aws iam get-policy \
+  --policy-arn arn:aws:iam::854912240456:policy/FastApiAppEsoReadSecret
+
+# 2) get the policy document
+aws iam get-policy-version \
+  --policy-arn arn:aws:iam::854912240456:policy/FastApiAppEsoReadSecret \
+  --version-id v1 \
+  --query 'PolicyVersion.Document' \
+  --output json
+# {
+#     "Version": "2012-10-17",
+#     "Statement": [
+#         {
+#             "Sid": "ReadFastApiDbSecret",
+#             "Effect": "Allow",
+#             "Action": [
+#                 "secretsmanager:GetSecretValue",
+#                 "secretsmanager:DescribeSecret"
+#             ],
+#             "Resource": "arn:aws:secretsmanager:us-east-1:854912240456:secret:rds!db-07a5c9bd-eaf9-46ac-8cba-abd6aebbecb6-bo6CvQ"
 #         }
 #     ]
 # }
@@ -172,8 +195,8 @@ aws eks describe-pod-identity-association \
 # }
 ```
 
-
-Create SecretStore
+### Create SecretStore
+NOTE: The `SecretStore` kind is a custom resource from `External Secrets Operator`.
 ```sh
 kubectl apply -f ./secrets/secretstore.yaml
 
@@ -186,15 +209,24 @@ kubectl describe secretstore aws-secretsmanager -n default
 ```
 
 
-Create the `ExternalSecret`
+### Create the `ExternalSecret`
 This is the object that says, "Read `DB_PASSWORD` from `AWS Secrets Manager` and write it into a Kubernetes Secret called `app-db-secret`."
 ⚠️ Make sure it's with how the pod expects the secret
 e.g., secret name (app-db-secret), secret key (DB_PASSWORD), secret_id from aws secrets manager (prod/fastapi-app/db)
 ```sh
-kubectl apply -f ./secrets/externalsecret.yaml
+# make sure to delete the secret we've created beofre:
+# k delete secret app-db-secret
+kubectl apply -f ./secrets/externalsecret_v0.yaml
 
+  # data:
+  #   - secretKey: DB_PASSWORD (what our pod expects)
+  #     remoteRef:
+  #       key: prod/fastapi-app/db (the secret id)
+  #       property: DB_PASSWORD (secret key in aws secretsmanager; we passed: --secret-string '{"DB_PASSWORD":"TopSecretPassword4DB!"}')
+```
 
-# verify ESO created the native Kubernetes Secret:
+Verify ESO created the native Kubernetes Secret:
+```sh
 kubectl get externalsecret -n default
 # NAME            STORETYPE     STORE                REFRESH INTERVAL   STATUS         READY   LAST SYNC
 # app-db-secret   SecretStore   aws-secretsmanager   1h                 SecretSynced   True    9m1s
@@ -226,7 +258,7 @@ kubectl get secret app-db-secret -n default
 If the Secret appears, the AWS → ESO → Kubernetes chain is working. You can confirm the created Kubernetes Secret with:
 ```sh
 kubectl get secret app-db-secret -n default -o jsonpath='{.data.DB_PASSWORD}' | base64 -d && echo
-# DoesThisSmellFunnyToYou?
+# TopSecretPassword4DB<>
 ```
 
 ## password update
@@ -236,8 +268,11 @@ aws secretsmanager put-secret-value \
   --secret-id prod/fastapi-app/db \
   --secret-string '{"DB_PASSWORD":"DoesThisSmellFunnyToYou?"}'
 
-kubectl get secret app-db-secret -n default \
-  -o jsonpath='{.data.DB_PASSWORD}' | base64 -d && echo
+# verify the password has changed
+aws secretsmanager get-secret-value \
+  --region $AWS_REGION \
+  --secret-id prod/fastapi-app/db
+
 
 # wait for 1m (refresh interval specified in `externalsecret`) for update:
 kubectl get secret app-db-secret -n default \

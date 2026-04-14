@@ -25,9 +25,9 @@ source .env
 eksctl create cluster \
   --name $CLUSTER_NAME \
   --region $AWS_REGION \
-  --nodes 1 \
+  --nodes 2 \
   --node-type t3.small \
-  --managed
+  --managed \
   --spot
 
 
@@ -209,9 +209,8 @@ echo 'RG9lc1RoaXNTbWVsbEZ1bm55VG9Zb3U/' | base64 -d
 # decode all values at once:
 kubectl get secret app-db-secret -o json | jq -r '.data | map_values(@base64d)'
 # {
-#   "DB_PASSWORD": "mypassword"
+#   "DB_PASSWORD": "TopSecretDBPassword!"
 # }
-
 ```
 
 ## ECR

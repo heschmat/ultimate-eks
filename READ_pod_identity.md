@@ -57,6 +57,8 @@ kubectl apply -f pod-ident-sa.yaml
 
 ## 📌 Pod Identity Addon Setup
 
+`eks-pod-identity-agent` enables **EKS Pod Identity**, letting Kubernetes pods securely assume IAM roles (without using `IRSA/OIDC` directly). It runs a _node-level agent_ that handles credential delivery to pods.
+
 ```sh
 aws eks create-addon \
   --cluster-name $CLUSTER_NAME \
@@ -66,6 +68,8 @@ aws eks create-addon \
 
 # verify (one per node)
 kubectl get pods -n kube-system | grep eks-pod-identity-agent
+# eks-pod-identity-agent-n9m7q      1/1     Running   0          9s
+# eks-pod-identity-agent-t7ks9      1/1     Running   0          9s
 
 aws eks list-addons --cluster-name $CLUSTER_NAME
 # {
@@ -161,9 +165,10 @@ aws eks list-pod-identity-associations --cluster-name $CLUSTER_NAME --region $AW
 
 # get the association-id above:
 # This is the direct proof that EKS has mapped the service account default/pod-ident-sa to the IAM role.
+association_id=a-z5jsgfv08qfy3nzgt
 aws eks describe-pod-identity-association \
   --cluster-name $CLUSTER_NAME \
-  --association-id a-z5jsgfv08qfy3nzgt \
+  --association-id $association_id \
   --region $AWS_REGION
 
 # {
@@ -271,6 +276,23 @@ Type "help", "copyright", "credits" or "license" for more information.
 # ✅✅✅ The pod is actually assuming the IAM role (FastApiS3Role)
 ```
 
+NOTE: The `arn` for the role `FastApiS3Role` in aws console is simply `'arn:aws:sts::854912240456:assumed-role/FastApiS3Role`. Then what's the suffix we see in the `Arn` above?
+
+The format of the `Arn` is `arn:aws:sts::<acct>:assumed-role/<role-name>/<session-name>`.   
+
+This is because the pod is NOT using the IAM role directly. **It is using temporary STS credentials for a session of that role.**
+
+With EKS Pod Identity, the pod gets credentials through the Pod Identity flow, and AWS says Pod Identity uses role assumption before providing temporary credentials to the pod. In other words, the pod receives short-lived credentials for a session of FastApiS3Role, not the role object itself.
+
+How to read your ARN:
+- `arn:aws:sts::854912240456` → this identity comes from STS
+- `assumed-role`
+- `FastApiS3Role` → the IAM role being assumed
+- `eks-fastapi-ek-fastapi-ek-0a02df99-af44-4f2e-b7b4-d6a1918819f9` → the role session name for that temporary session. AWS notes that assumed-role ARNs include the session name.
+
+For EKS Pod Identity, AWS defines the session name format as: `eks-<cluster-name>-<pod-name>-<random-uuid>`. That UUID makes every credential session unique, even if the same pod refreshes credentials multiple times.
+
+
 Before we explain, you could simply use this command for all the above:
 
 ```sh
@@ -287,8 +309,9 @@ If in above code you see:
 
 Now we can test the app:
 ```sh
+H_=http://98.86.175.6:30145
 curl -X 'POST' \
-  'http://98.86.175.6:30145/upload' \
+  $H_/upload \
   -H 'accept: application/json' \
   -H 'Content-Type: multipart/form-data' \
   -F 'file=@dark-knight.jpg;type=image/jpeg'
@@ -298,6 +321,9 @@ curl -X 'GET' \
   'http://98.86.175.6:30145/files/1/download-url?expires_in=900' \
   -H 'accept: application/json'
 # {"file_id":1,"filename":"dark-knight.jpg","expires_in":900,"download_url":"https://fastapi-eks-demo-ijk.s3.amazonaws.com/uploads/02ecd804-dark-knight.jpg?AWSAccessKeyId=ASIA4ODF5RNECFFQVRSH&Signature=Frrr....}
+
+# NOTE: `?` is a special character in zsh, so we wrap it in ""
+# curl "http://$H_/files/1/download-url?expires_in=900"
 ```
 
 ---
