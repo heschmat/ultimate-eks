@@ -28,11 +28,15 @@ eksctl create cluster \
   --nodes 1 \
   --node-type t3.small \
   --managed
+  --spot
+
 
 # 3) connect kubectl to cluster
 aws eks update-kubeconfig --region $AWS_REGION --name $CLUSTER_NAME
 
 # 4) verify
+eksctl get cluster
+
 aws eks list-clusters --region $AWS_REGION
 # aws eks list-clusters --profile my-profile
 kubectl get nodes
@@ -63,7 +67,6 @@ export VPC_ID=$(aws eks describe-cluster \
 
 echo $VPC_ID
 
-
 # create a security group for the DB:
 export DB_SG_ID=$(aws ec2 create-security-group \
   --group-name ${APP_NAME}-rds-sg \
@@ -74,7 +77,6 @@ export DB_SG_ID=$(aws ec2 create-security-group \
   --output text)
 
 echo $DB_SG_ID
-
 
 # get EKS subnet IDs:
 # aws ec2 describe-subnets \

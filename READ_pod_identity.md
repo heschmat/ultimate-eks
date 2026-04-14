@@ -64,7 +64,7 @@ aws eks create-addon \
   --region $AWS_REGION
 
 
-# verify
+# verify (one per node)
 kubectl get pods -n kube-system | grep eks-pod-identity-agent
 
 aws eks list-addons --cluster-name $CLUSTER_NAME
@@ -124,6 +124,13 @@ aws iam attach-role-policy \
   --role-name $IAM_ROLE_NAME \
   --policy-arn arn:aws:iam::$AWS_ACCOUNT_ID:policy/$IAM_POLICY_NAME
 
+aws eks list-pod-identity-associations \
+  --cluster-name $CLUSTER_NAME \
+  --region $AWS_REGION
+# {
+#     "associations": []
+# }
+
 # associate the IAM role with the service account
 # This is the bridge between Kubernetes and AWS.
 # translation 🪧:
@@ -136,6 +143,43 @@ aws eks create-pod-identity-association \
   --service-account pod-ident-sa \
   --role-arn arn:aws:iam::$AWS_ACCOUNT_ID:role/$IAM_ROLE_NAME \
   --region $AWS_REGION
+
+
+# verify
+aws eks list-pod-identity-associations   --cluster-name $CLUSTER_NAME   --region $AWS_REGION
+# {
+#     "associations": [
+#         {
+#             "clusterName": "fastapi-eks-demo",
+#             "namespace": "default",
+#             "serviceAccount": "pod-ident-sa",
+#             "associationArn": "arn:aws:eks:us-east-1:854912240456:podidentityassociation/fastapi-eks-demo/a-z5jsgfv08qfy3nzgt",
+#             "associationId": "a-z5jsgfv08qfy3nzgt" 👇
+#         }
+#     ]
+# }
+
+# get the association-id above:
+# This is the direct proof that EKS has mapped the service account default/pod-ident-sa to the IAM role.
+aws eks describe-pod-identity-association \
+  --cluster-name $CLUSTER_NAME \
+  --association-id a-z5jsgfv08qfy3nzgt \
+  --region $AWS_REGION
+
+# {
+#     "association": {
+#         "clusterName": "fastapi-eks-demo",
+#         "namespace": "default",
+#         "serviceAccount": "pod-ident-sa", ✅
+#         "roleArn": "arn:aws:iam::854912240456:role/FastApiS3Role", ✅
+#         "associationArn": "arn:aws:eks:us-east-1:854912240456:podidentityassociation/fastapi-eks-demo/a-z5jsgfv08qfy3nzgt",
+#         "associationId": "a-z5jsgfv08qfy3nzgt",
+#         "tags": {},
+#         "createdAt": "2026-04-14T05:19:56.800000+00:00",
+#         "modifiedAt": "2026-04-14T05:19:56.800000+00:00",
+#         "disableSessionTags": false
+#     }
+# }
 ```
 
 ---
@@ -161,6 +205,7 @@ kubectl exec -it deploy/fastapi-eks-demo -- env | grep AWS_
 # AWS_DEFAULT_REGION=us-east-1
 # AWS_REGION=us-east-1
 
+# ✅ the pod received Pod Identity env vars
 # ⚠️ If you don't see the top 4 env. variable, sth is wront.
 ```
 
@@ -222,6 +267,8 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>>
 >>> print(boto3.client("sts").get_caller_identity())
 {'UserId': 'AROA4ODF5RNEAB6KHRZN6:eks-fastapi-de-fastapi-ek-6fc9926b-dbdd-477a-b4dd-4168b52364ac', 'Account': '854912240456', 'Arn': 'arn:aws:sts::854912240456:assumed-role/FastApiS3Role/eks-fastapi-de-fastapi-ek-6fc9926b-dbdd-477a-b4dd-4168b52364ac', ...}
+
+# ✅✅✅ The pod is actually assuming the IAM role (FastApiS3Role)
 ```
 
 Before we explain, you could simply use this command for all the above:
@@ -237,6 +284,21 @@ If in above code you see:
 ```
 
 (the IAM role we created above), that's a confirmation that pod identity association is correct and boto3 is using the right role.
+
+Now we can test the app:
+```sh
+curl -X 'POST' \
+  'http://98.86.175.6:30145/upload' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: multipart/form-data' \
+  -F 'file=@dark-knight.jpg;type=image/jpeg'
+
+# get a temp. download url for the file
+curl -X 'GET' \
+  'http://98.86.175.6:30145/files/1/download-url?expires_in=900' \
+  -H 'accept: application/json'
+# {"file_id":1,"filename":"dark-knight.jpg","expires_in":900,"download_url":"https://fastapi-eks-demo-ijk.s3.amazonaws.com/uploads/02ecd804-dark-knight.jpg?AWSAccessKeyId=ASIA4ODF5RNECFFQVRSH&Signature=Frrr....}
+```
 
 ---
 
