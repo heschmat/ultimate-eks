@@ -1,0 +1,9 @@
+services:
+  tf:
+    image: hashicorp/terraform:1.15
+    working_dir: /workspace
+    volumes:
+      - .:/workspace/deploy
+      - ~/.aws:/root/.aws:ro
+    environment:
+      - TF_WORKSPACE=${TF_WORKSPACE:-}
